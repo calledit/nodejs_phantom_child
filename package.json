@@ -1,0 +1,14 @@
+{
+  "name": "nodejsphantom",
+  "description": "A lib to use phantomjs in nodejs",
+  "author": {
+    "name": "Calle Sg"
+  },
+  "version": "0.0.37",
+  "main": "./nodejsphantom.js",
+  "preferGlobal": false,
+  "dependencies":{
+    "win-spawn": "*"
+    },
+    "readme": "A lib to use phantomjs in nodejs projects"
+}
