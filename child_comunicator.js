@@ -1,16 +1,168 @@
 
-//var WebSocketServer = require('ws').Server
-  //, wss = new WebSocketServer({port: 23815});
-  //
-
 var spawn = require('win-spawn'),
     http = require('http');
 
 var CachedValues = [];
 
 
+function ChildCom(binaryFileName, rpcPort, onBinaryRunning, options){
+	
+	//Check that arguments and such is OK
+	if(this.constructor != arguments.callee){
+		throw ('Programing Error: The function "'+arguments.callee.name+'" most be created as an instance with the javascript new operator');
+	}
+	this.className = arguments.callee.name;
+	var self = this;
+
+    if(typeof(binaryFileName) != 'string'){
+		throw ('Argument Error: argument binaryFileName needs to be set to a string. Value was:'+binaryFileName);
+	}
+	self.binaryFileName = binaryFileName;
+
+    if(typeof(onBinaryRunning) == 'undefined'){
+		onBinaryRunning = function(){
+			console.log('Child "'+self.binaryFileName+'" is now running')
+		};
+	}
+	self.rpcPort = rpcPort;
+
+    if(typeof(rpcPort) != 'number'){
+		throw ('Argument Error: argument rpcPort needs to be set to a number. Value was: '+rpcPort);
+	}
+	self.rpcPort = rpcPort;
+	
+	if(typeof(options) == 'undefined'){
+		options = {};
+	}
+	self.options = options;
+	
+	if(typeof(self.options.args) == 'undefined'){
+		self.options.args = [];
+	}
+
+	//Spawn the binary and attach all the required callbacks
+    self.childProcess = spawn(self.binaryFileName, self.options.args.concat([__dirname + '/child_script.js', self.rpcPort]));
+	self.childProcess.stdout.on('data', self.options.onStdout || function(data){
+		console.log('Child "'+self.binaryFileName+'" Stdout: '+data)
+	});
+	self.childProcess.stderr.on('data', self.options.onStderr || function(data){
+		console.log('Child "'+self.binaryFileName+'" Stderr: '+data)
+	});
+	self.childProcess.on('error', function(err) {
+		if((err != null ? err.code : void 0) === 'ENOENT'){
+			throw('ChildError: Does the child binary "'+self.binaryFileName+'" exsist? There was an error with it.');
+		}else{
+			throw('ChildError: The child binary "'+self.binaryFileName+'" failed somehow.');
+		}
+	});
+	self.childProcess.on('exit', self.options.onExit || function(code, signal){
+		console.log('Child "'+self.binaryFileName+'" exited, with exit code: ', code, signal)
+	});
+
+	//Send ping to child to see if it is upp and running
+	self.pingUntilPong(function(){
+		self.startServerPuller(null);
+		onBinaryRunning();
+	},function(){
+		console.error('Could not initiate a connection to child "'+self.binaryFileName+'" somthing most be wrong with the child.');
+	})
+}
+
+ChildCom.prototype.pingUntilPong = function pingUntilPong(onOK, failCounter, onFail){
+	var self = this;
+	self.sendCommand('Ping', {}, function(PingAnswer){
+		//Got Pong run callback
+		onOK(failCounter);
+	},function(e){
+		//Did not get pong repport failiure if tried to many times or wait and try again
+		if(failCounter<0){
+			onFail(failCounter);
+		}else{
+			setTimeout(function(){
+				self.pingUntilPong(onOK, failCounter-1, onFail);
+			},500);
+		}
+	});
+}
+ChildCom.prototype.clientReciver = function clientReciver(PullResponse){
+	console.log('PullResponse:'+PullResponse);
+}
+
+ChildCom.prototype.sendCommand = function sendCommand(Command, Value, callback, onComunicationError){
+	var self = this;
+    var JsonTosend = ToPhantJson({'Command':Command, 'Value': Value});
+    var Headers = {'Content-length': JsonTosend.length}
+    var req = http.request({hostname:'localhost', headers: Headers, port: self.rpcPort, path:'/to_phantom', method: 'POST', agent: false}, function (res) {
+        var RecivedJson = ""
+        res.on('data', function (chunk) {
+            RecivedJson += chunk;
+        });
+        res.on('close', function (chunk) {
+            RecivedJson += chunk;
+        });
+        res.on('end', function () {
+            if(RecivedJson != ''){
+				var RetDat = true;
+				try{
+					RetDat = JSON.parse(RecivedJson);
+				}catch(e){
+					RetDat = false;
+				}
+                if(!RetDat){
+                    throw ('the data that the child binary "'+self.binaryFileName+'" returned is not valid JSON. Data:'+ RecivedJson);
+                }else{
+                    callback(RetDat);
+                }
+            }else{
+                throw ('Answer from the child binary "'+self.binaryFileName+'" contained no returned data');
+            }
+        });
+    })
+    req.on('error', onComunicationError || function(e) {
+        console.error('Some kind of error when comunicating with the child binary "'+self.binaryFileName+'": ' + e.message);
+    });
+    req.write(JsonTosend);
+    req.end();
+}
+
+ChildCom.prototype.execFunc = function execFunc(Func, args, callback){
+	var self = this;
+	var PublicArgs = [];
+	for(var ArgNUm in args){
+		PublicArgs[ArgNUm] = ObjToPublicDescriptor(args[ArgNUm]);
+	}
+	var FuncDescriptor = {'args': PublicArgs};
+	if(typeof(Func) == 'function'){
+		FuncDescriptor.FuncText = Func.toString();
+	}else if(typeof(Func) == 'number'){
+		FuncDescriptor.FuncPublicId = Func;
+	}else{
+		throw ("Programing Error: Func needs to be either a function or a public id")
+	}
+	self.sendCommand('execFunc', FuncDescriptor, function(DataFromServer){
+		var RemoteObj = PublicDescriptorToObj(DataFromServer);
+		callback(RemoteObj);
+	});
+}
+
+ChildCom.prototype.startServerPuller = function startServerPuller(AnswerToServer){
+	var self = this;
+	self.sendCommand('Answer', AnswerToServer, function(DataFromServer){
+		var NewAns = null;
+		if(typeof(self.clientReciver) == 'function'){
+			NewAns = self.clientReciver(DataFromServer);
+		}
+		//wait a bit with starting a new server pull conection
+		setTimeout(function(){
+			self.startServerPuller(NewAns);
+		}, 1);
+	});
+}
+
+module.exports = ChildCom;
+
 var nodejsphantom = {
-    phantomProccess:null,
+	phantomProccess:null,
 	clientReciver:null,
     RpcPort: 45823,
     options:{},
@@ -56,38 +208,8 @@ var nodejsphantom = {
     }
 }
 
-function StartServerPuller(AnswerToServer){
-	nodejsphantom.sendCommand('Answer', AnswerToServer, function(DataFromServer){
-		var NewAns = null;
-		if(typeof(nodejsphantom.clientReciver) == 'function'){
-			NewAns = nodejsphantom.clientReciver(DataFromServer);
-		}
-		setTimeout(function(){
-			console.log("answer pull message with", NewAns)
-			StartServerPuller(NewAns);
-		}, 1);
-	});
-}
 
 
-nodejsphantom.execFunc = function execFunc(Func, args, callback){
-	var PublicArgs = [];
-	for(var ArgNUm in args){
-		PublicArgs[ArgNUm] = ObjToPublicDescriptor(args[ArgNUm]);
-	}
-	var FuncDescriptor = {'args': PublicArgs};
-	if(typeof(Func) == 'function'){
-		FuncDescriptor.FuncText = Func.toString();
-	}else if(typeof(Func) == 'number'){
-		FuncDescriptor.FuncPublicId = Func;
-	}else{
-		console.error("Func needs to be either a function or a public id")
-	}
-	nodejsphantom.sendCommand('execFunc', FuncDescriptor, function(DataFromServer){
-		var RemoteObj = PublicDescriptorToObj(DataFromServer);
-		callback(RemoteObj);
-	});
-}
 function ObjToPublicDescriptor(Obj){
 	if(typeof(Obj) == 'object'){
 		if(typeof(Obj.remoteId) != 'undefined'){
@@ -134,41 +256,6 @@ function(){
 	return(PublicObj);
 }
 
-nodejsphantom.sendCommand = function sendCommand(Command, Value, callback){
-    JsonTosend = ToPhantJson({'Command':Command, 'Value': Value});
-    var Headers = {'Content-length': JsonTosend.length}
-    var req = http.request({hostname:'localhost', headers: Headers, port:nodejsphantom.RpcPort, path:'/to_phantom', method: 'POST', agent: false}, function (res) {
-        var RecivedJson = ""
-        res.on('data', function (chunk) {
-            RecivedJson += chunk;
-        });
-        res.on('close', function (chunk) {
-            RecivedJson += chunk;
-        });
-        res.on('end', function () {
-            if(RecivedJson != ''){
-				var RetDat = true;
-				try{
-					RetDat = JSON.parse(RecivedJson);
-				}catch(e){
-					RetDat = false;
-				}
-                if(!RetDat){
-                    console.error('The returned data is not valid JSON', RecivedJson);
-                }else{
-                    callback(RetDat);
-                }
-            }else{
-                console.error('Answer from phantom contained no returned data');
-            }
-        });
-    })
-    req.on('error', function(e) {
-        console.error('SOme kind of error when comuniccationg with phantomjs: ' + e.message);
-    });
-    req.write(JsonTosend);
-    req.end();
-}
 
 /*
 function ExecRemote(_id, args, ResultCallback){
@@ -311,4 +398,3 @@ function ToPhantJson(In){
 }
 
 
-module.exports = nodejsphantom;

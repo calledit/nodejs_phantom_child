@@ -324,7 +324,6 @@ function createPublicationObj(FromObj){
 	if(InType != 'function'){
 		var PublicCopy = {}
 		for(var key in FromObj){//Publizie keys in object
-			console.log(key,'=', typeof(FromObj[key]));
 			PublicCopy[key] = createPublicationObj(FromObj[key]);
 		}
 		PublicationObj.obj = PublicCopy;

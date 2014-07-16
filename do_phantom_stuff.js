@@ -1,4 +1,27 @@
-var child_comunicator = require("./child_comunicator.js");
+var childComClass = require("./child_comunicator.js");
+
+
+var childCom = new childComClass("../patched_phantomjs", 35632, function(){
+
+	console.log(childCom)
+	childCom.execFunc(
+		function(){
+			return(phantom);
+		},
+		null,
+		function(ret){
+			console.log(ret);
+		});
+
+});
+
+
+
+
+
+
+//process.exit(0);
+/*
 child_comunicator.clientReciver = function(MessageFromPhantom){
 	
 	console.log("Got a pulling message from phantom",MessageFromPhantom)
@@ -42,7 +65,7 @@ child_comunicator.init("../patched_phantomjs", function(RemoteResult){
 }, null, function(PageAndHidden){
 	console.log('PageAndHidden', PageAndHidden);
 });
-	
+	*/
 /*
 	child_comunicator.execFunc(function(){
 		console.log("Show me the stuff", webPage.create);
@@ -66,7 +89,7 @@ child_comunicator.init("../patched_phantomjs", function(RemoteResult){
 	});
 */
 
-});
+//});
 
 function PreDump(S, cache, cacheInfo, road){
     if(typeof(cache) == 'undefined'){
